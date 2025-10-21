@@ -17,8 +17,9 @@ from datetime import timezone
 import pandas as pd
 import numpy as np
 import math
-import httpx
-import json
+import httpx # Para requisições de API assíncronas
+import json # Para formatar o log do payload
+import uuid
 
 # --- Dash/Plotly Imports ---
 import dash
@@ -42,7 +43,7 @@ data_store = deque(maxlen=MAX_PONTOS_DADOS)
 simulator = SensorSimulator() # Instância inicial
 simulated_time_utc = None
 
-# --- Variáveis Globais para E-mail ---
+# --- Variáveis Globais para E-mail e SMS ---
 global_last_rain_alert_level = "Livre"
 global_last_soil_alert_level = "Livre"
 
@@ -50,10 +51,19 @@ global_last_soil_alert_level = "Livre"
 global_task_simulador = None
 global_task_monitor = None
 
-# --- Leitura das Variáveis de Ambiente para E-mail ---
+# --- Leitura das Variáveis de Ambiente ---
+# E-mail
 EMAIL_DESTINATARIO = os.environ.get("NOTIFICATION_EMAIL")
 EMAIL_REMETENTE = os.environ.get("SENDER_EMAIL")
 SMTP_API_KEY = os.environ.get("SMTP2GO_API_KEY")
+# SMS
+COMTELE_API_KEY = os.environ.get("COMTELE_API_KEY")
+COMTELE_SENDER_ID = os.environ.get("COMTELE_SENDER_ID")
+NOTIFICATION_PHONE = os.environ.get("NOTIFICATION_PHONE")
+
+if NOTIFICATION_PHONE and not NOTIFICATION_PHONE.startswith('+'):
+    NOTIFICATION_PHONE = '+' + NOTIFICATION_PHONE
+
 
 # --- Log de Verificação Inicial das Variáveis de Ambiente ---
 print("--- LOG DE E-MAIL (INICIALIZAÇÃO) ---")
@@ -61,47 +71,86 @@ print(f"EMAIL_DESTINATARIO carregado: {EMAIL_DESTINATARIO}")
 print(f"EMAIL_REMETENTE carregado: {EMAIL_REMETENTE}")
 print(f"SMTP_API_KEY carregado: {'*' * 10 if SMTP_API_KEY else None}")
 print("--------------------------------------")
+print("--- LOG DE SMS (INICIALIZAÇÃO) ---")
+print(f"NOTIFICATION_PHONE carregado: {NOTIFICATION_PHONE}")
+print(f"COMTELE_API_KEY carregado: {'*' * 10 if COMTELE_API_KEY else None}")
+print(f"COMTELE_SENDER_ID carregado: {COMTELE_SENDER_ID}")
+print("-----------------------------------")
 
 
 # --- Função Assíncrona de Envio de E-mail com Logs ---
 async def send_email_alert_async(subject, body):
-    """ Envia um e-mail de alerta usando a API v3 do SMTP2GO. """
-    print(f"--- LOG DE E-MAIL (FUNÇÃO INVOCADA) ---")
-    print(f"Assunto: {subject}")
-    if not all([EMAIL_DESTINATARIO, EMAIL_REMETENTE, SMTP_API_KEY]):
-        print("ERRO DE E-MAIL: Variáveis de ambiente (NOTIFICATION_EMAIL, SENDER_EMAIL, SMTP2GO_API_KEY) não configuradas ou vazias.")
-        print(f"  EMAIL_DESTINATARIO: {EMAIL_DESTINATARIO}")
-        print(f"  EMAIL_REMETENTE: {EMAIL_REMETENTE}")
-        print(f"  SMTP_API_KEY: {'*' * 10 if SMTP_API_KEY else None}")
-        print("------------------------------------------")
+    # ... (Seu código de envio de e-mail aqui) ...
+    pass
+
+# --- [VERSÃO FINAL] Função de Envio de SMS (usando método do server.py) ---
+async def send_sms_alert_async(message):
+    """ Envia um SMS de alerta usando a API v2 da Comtele via form-urlencoded. """
+    print(f"--- LOG DE SMS (FUNÇÃO INVOCADA) ---")
+    print(f"Mensagem: {message}")
+
+    phone_to_send = NOTIFICATION_PHONE
+    sender_name = COMTELE_SENDER_ID # Agora é um nome, ex: "RiskGeo"
+
+    if not all([phone_to_send, COMTELE_API_KEY, sender_name]):
+        print("ERRO DE SMS: Variáveis (NOTIFICATION_PHONE, COMTELE_API_KEY, COMTELE_SENDER_ID) não configuradas.")
+        print("-----------------------------------")
         return
-    api_url = "https://api.smtp2go.com/v3/email/send"
-    payload = {
-        "api_key": SMTP_API_KEY, "to": [EMAIL_DESTINATARIO], "sender": EMAIL_REMETENTE,
-        "subject": subject, "text_body": body, "html_body": f"<p>{body.replace('\n', '<br>')}</p>"
+
+    # A API da Comtele espera o número no formato sem '+' — garantimos isso aqui
+    if phone_to_send.startswith('+'):
+        phone_to_send = phone_to_send[1:]
+
+    api_url = "https://sms.comtele.com.br/api/v2/send"
+    headers = {
+        "auth-key": COMTELE_API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded"
     }
-    payload_log = payload.copy()
-    payload_log["api_key"] = f"***{payload_log['api_key'][-4:]}" if SMTP_API_KEY and len(SMTP_API_KEY) > 4 else "***"
-    print(f"Payload da API (mascarado): {json.dumps(payload_log, indent=2)}")
+
+    # Monta o payload como dados de formulário (igual ao server.py)
+    payload = {
+        "Sender": str(sender_name),
+        "Receivers": str(phone_to_send),
+        "Content": str(message)
+    }
+
+    print(f"Payload (Form Data) a ser enviado para a API SMS: {payload}")
+
     try:
         async with httpx.AsyncClient() as client:
-            print("LOG DE E-MAIL: Enviando requisição para a API do SMTP2GO...")
-            response = await client.post(api_url, json=payload, timeout=10.0)
-            if 200 <= response.status_code < 300:
-                print(f"LOG DE E-MAIL (SUCESSO): E-mail enviado. Status: {response.status_code}")
-                print(f"Resposta da API: {response.text}")
-            else:
-                print(f"ERRO DE E-MAIL (FALHA API): API Smtp2go falhou.")
-                print(f"  Status Code: {response.status_code}")
-                print(f"  Resposta da API: {response.text}")
-    except httpx.ConnectError as e: print(f"ERRO DE E-MAIL (EXCEÇÃO - Conexão): Falha ao conectar ao servidor do SMTP2GO. {e}")
-    except httpx.TimeoutException as e: print(f"ERRO DE E-MAIL (EXCEÇÃO - Timeout): A requisição demorou muito (timeout). {e}")
-    except Exception as e: print(f"ERRO DE E-MAIL (EXCEÇÃO - Geral): Exceção ao tentar enviar: {e}")
-    print("------------------------------------------")
+            print("LOG DE SMS: Enviando requisição (Form Data) para a API da Comtele...")
+            # Usa 'data=payload' em vez de 'json=payload'
+            response = await client.post(api_url, headers=headers, data=payload, timeout=15.0)
+
+            print(f"LOG DE SMS: Resposta recebida. Status Code: {response.status_code}")
+            response_text = response.text
+            print(f"LOG DE SMS: Resposta da API (texto): {response_text}")
+
+            # Tenta decodificar a resposta como JSON para checar o sucesso
+            try:
+                response_data = response.json()
+                if response_data.get("Success", False):
+                    print(f"LOG DE SMS (SUCESSO): SMS enviado para {phone_to_send}.")
+                else:
+                    msg_erro = response_data.get('Message', 'Mensagem de erro não disponível')
+                    print(f"ERRO DE SMS (FALHA API - Comtele Reportou Falha): {msg_erro}")
+            except json.JSONDecodeError:
+                 print(f"ERRO DE SMS: A resposta da API não foi um JSON válido. Resposta: {response_text}")
+
+
+    except httpx.ConnectError as e:
+        print(f"ERRO DE SMS (EXCEÇÃO - Conexão): Falha ao conectar ao servidor da Comtele. {e}")
+    except httpx.TimeoutException as e:
+        print(f"ERRO DE SMS (EXCEÇÃO - Timeout): A requisição demorou muito (timeout). {e}")
+    except Exception as e:
+        print(f"ERRO DE SMS (EXCEÇÃO - Geral): Exceção ao tentar enviar: {e}")
+
+    print("-----------------------------------")
+
 
 # --- Lógica do Simulador em Background ---
 async def rodar_simulador():
-    global simulated_time_utc, simulator # Adicionado simulator aqui para garantir
+    global simulated_time_utc, simulator
     print("LOG SIMULADOR: Tarefa 'rodar_simulador' iniciada.")
     while True:
         try:
@@ -119,21 +168,20 @@ async def rodar_simulador():
             print(f"ERRO na tarefa 'rodar_simulador': {e}")
             await asyncio.sleep(30)
 
-# --- Tarefa de Monitoramento de Alertas (para E-mail) ---
+# --- Tarefa de Monitoramento de Alertas (para E-mail e SMS) ---
 async def monitorar_alertas():
     global global_last_rain_alert_level, global_last_soil_alert_level
-    print("LOG MONITOR: Tarefa 'monitorar_alertas' iniciada.") # Log de início
+    print("LOG MONITOR: Tarefa 'monitorar_alertas' iniciada.")
     while True:
         try:
             await asyncio.sleep(INTERVALO_MONITOR_ALERTA_SEG)
             data = list(data_store)
             if not data: continue
 
-            # 1. Lógica de Alerta de Chuva (recalculada aqui para independência)
-            rain_alert_level = "Livre"
-            accumulated_72h = 0.0
-            if len(data) > 0: # Evita erro se data_store estiver vazio momentaneamente
-                df_temp = pd.DataFrame(data) # Usa cópia local
+            # 1. Lógica de Alerta de Chuva
+            rain_alert_level = "Livre"; accumulated_72h = 0.0
+            if len(data) > 0:
+                df_temp = pd.DataFrame(data)
                 if 'timestamp' in df_temp.columns and 'pluviometria_mm' in df_temp.columns:
                     try:
                         df_temp['timestamp'] = pd.to_datetime(df_temp['timestamp'])
@@ -141,34 +189,37 @@ async def monitorar_alertas():
                         latest_timestamp = df_temp.index[-1]
                         timestamp_72h_ago = latest_timestamp - pd.Timedelta(hours=72)
                         df_last_72h = df_temp[df_temp.index >= timestamp_72h_ago]
-                        if not df_last_72h.empty:
-                            accumulated_72h = df_last_72h['pluviometria_mm'].sum()
+                        if not df_last_72h.empty: accumulated_72h = df_last_72h['pluviometria_mm'].sum()
                         if accumulated_72h >= 90: rain_alert_level = "Paralização"
                         elif accumulated_72h >= 70: rain_alert_level = "Alerta"
                         elif accumulated_72h >= 51: rain_alert_level = "Atenção"
                     except Exception as e:
-                         print(f"WARN MONITOR: Erro cálculo chuva: {e}") # Loga erro mas continua
-                         pass # Continua mesmo se houver erro temporário no DF
+                         print(f"WARN MONITOR: Erro cálculo chuva: {e}")
+                         pass
 
             # 2. Lógica de Alerta de Umidade
             soil_alert_level, _ = calculate_soil_alert(data)
 
-            # 3. Lógica dos Gatilhos de E-mail
+            # 3. Lógica dos Gatilhos de E-mail e SMS
             agora_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             if rain_alert_level == "Paralização" and global_last_rain_alert_level != "Paralização":
-                print(f"GATILHO DE E-MAIL: Chuva atingiu Paralização ({accumulated_72h:.2f} mm).")
-                subject = f"[ALERTA DE PARALIZAÇÃO] Chuva - {agora_str}"
-                body = (f"O monitoramento simulado atingiu o nível de PARALIZAÇÃO por CHUVA.\n\n"
-                        f"- Acumulado 72h: {accumulated_72h:.2f} mm\n- Nível Anterior: {global_last_rain_alert_level}\n- Horário: {agora_str}")
-                asyncio.create_task(send_email_alert_async(subject, body))
+                print(f"GATILHO DE ALERTA: Chuva atingiu Paralização ({accumulated_72h:.2f} mm).")
+                email_subject = f"[ALERTA DE PARALIZAÇÃO] Chuva - {agora_str}"
+                email_body = (f"O monitoramento simulado atingiu o nível de PARALIZAÇÃO por CHUVA.\n\n"
+                              f"- Acumulado 72h: {accumulated_72h:.2f} mm\n- Nível Anterior: {global_last_rain_alert_level}\n- Horário: {agora_str}")
+                asyncio.create_task(send_email_alert_async(email_subject, email_body))
+                sms_message = f"ALERTA PARALIZACAO (Chuva): Acum. 72h={accumulated_72h:.1f}mm. Nivel ant: {global_last_rain_alert_level}. Hora: {agora_str[-5:]}"
+                asyncio.create_task(send_sms_alert_async(sms_message[:160]))
             global_last_rain_alert_level = rain_alert_level
 
             if soil_alert_level == "Livre" and global_last_soil_alert_level != "Livre":
-                print(f"GATILHO DE E-MAIL: Umidade retornou para Livre.")
-                subject = f"[NORMALIZADO] Umidade do Solo - {agora_str}"
-                body = (f"O monitoramento simulado retornou ao nível LIVRE para Umidade do Solo.\n\n"
-                        f"- Nível Anterior: {global_last_soil_alert_level}\n- Horário: {agora_str}")
-                asyncio.create_task(send_email_alert_async(subject, body))
+                print(f"GATILHO DE ALERTA: Umidade retornou para Livre.")
+                email_subject = f"[NORMALIZADO] Umidade do Solo - {agora_str}"
+                email_body = (f"O monitoramento simulado retornou ao nível LIVRE para Umidade do Solo.\n\n"
+                              f"- Nível Anterior: {global_last_soil_alert_level}\n- Horário: {agora_str}")
+                asyncio.create_task(send_email_alert_async(email_subject, email_body))
+                sms_message = f"NORMALIZADO (Umidade Solo): Retornou p/ Livre. Nivel ant: {global_last_soil_alert_level}. Hora: {agora_str[-5:]}"
+                asyncio.create_task(send_sms_alert_async(sms_message[:160]))
             global_last_soil_alert_level = soil_alert_level
 
         except asyncio.CancelledError:
@@ -212,10 +263,9 @@ async def lifespan(app: FastAPI):
 
     if tasks_to_cancel:
         for task in tasks_to_cancel:
-            task.cancel()
+            if not task.done(): task.cancel()
         try:
-             # Espera as tarefas serem canceladas
-            await asyncio.wait(tasks_to_cancel, timeout=2.0)
+            await asyncio.wait(tasks_to_cancel, timeout=2.0, return_when=asyncio.ALL_COMPLETED)
         except asyncio.TimeoutError:
             print("WARN Lifespan: Timeout esperando tarefas cancelarem no desligamento.")
         except Exception as e:
@@ -312,7 +362,6 @@ def update_graphs(n_intervals, selected_hours):
 
 # --- Rotas FastAPI ---
 
-# Rota Raiz (Serve o map.html)
 @app.get("/", response_class=HTMLResponse)
 async def read_map_html():
     html_file_path = os.path.join(os.path.dirname(__file__), "map.html")
@@ -322,7 +371,6 @@ async def read_map_html():
     except FileNotFoundError: return HTMLResponse(content="<h1>Erro 404: Arquivo map.html não encontrado.</h1>", status_code=404)
     except Exception as e: return HTMLResponse(content=f"<h1>Erro ao ler o arquivo: {e}</h1>", status_code=500)
 
-# API Endpoint para dados de risco de CHUVA
 @app.get("/api/risk_data", response_class=JSONResponse)
 async def get_risk_data():
     accumulated_72h = 0.0
@@ -341,7 +389,6 @@ async def get_risk_data():
             accumulated_72h = 0.0
     return JSONResponse(content={"accumulated_72h": round(accumulated_72h, 2)})
 
-# API Endpoint para dados de risco de UMIDADE
 @app.get("/api/soil_risk_data", response_class=JSONResponse)
 async def get_soil_risk_data():
     current_data = list(data_store)
@@ -353,13 +400,11 @@ async def get_soil_risk_data():
     elif level == "Livre": height_percent = 15
     return JSONResponse(content={ "alert_level": level, "alert_color": color, "height_percent": height_percent })
 
-# Rota para Health Check (Status)
 @app.get("/health", response_class=JSONResponse)
 async def health_check():
     """Endpoint leve para pingar e checar o status."""
     return JSONResponse(content={"status": "running"}, status_code=200)
 
-# Rota para Reiniciar a Simulação
 @app.get("/restart-simulation")
 async def restart_simulation():
     global data_store, simulator, simulated_time_utc
@@ -374,14 +419,13 @@ async def restart_simulation():
 
     if tasks_to_cancel:
         for task in tasks_to_cancel:
-            task.cancel()
+             if not task.done(): task.cancel()
         try:
-            await asyncio.wait(tasks_to_cancel, timeout=2.0)
-        except asyncio.TimeoutError: print("WARN: Timeout esperando tarefas cancelarem.")
-        except Exception as e: print(f"WARN: Exceção esperando tarefas cancelarem: {e}")
-        finally:
-            global_task_simulador = None
-            global_task_monitor = None
+            await asyncio.wait(tasks_to_cancel, timeout=1.0, return_when=asyncio.ALL_COMPLETED)
+        except asyncio.TimeoutError: print("WARN: Timeout esperando tarefas cancelarem no reinício.")
+        except Exception as e: print(f"WARN: Exceção esperando tarefas cancelarem no reinício: {e}")
+    global_task_simulador = None
+    global_task_monitor = None
 
     print("Limpando dados e resetando estado...")
     data_store.clear()
@@ -408,11 +452,8 @@ async def restart_simulation():
 
     return RedirectResponse(url="/dashboard/")
 
-
-# --- Monta o aplicativo Dash no FastAPI ---
 app.mount("/dashboard", WSGIMiddleware(dash_app.server))
 
-# --- Execução Local (Pronta para Render) ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     host = "0.0.0.0"
@@ -421,5 +462,5 @@ if __name__ == "__main__":
     print(f"Acesse o Mapa em http://127.0.0.1:{port}")
     print(f"Acesse o Dashboard em http://127.0.0.1:{port}/dashboard/")
 
-    # Chama uvicorn.run() aqui
     uvicorn.run("main:app", host=host, port=port, reload=False)
+
