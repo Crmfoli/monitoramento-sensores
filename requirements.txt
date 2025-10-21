@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+asyncio
+dash
+dash-bootstrap-components
+plotly
+pandas

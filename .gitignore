@@ -1,0 +1,11 @@
+# Pasta virtual do Python (essencial)
+.venv/
+# Arquivos de cache do Python
+__pycache__/
+*.pyc
+# Pasta do PyCharm
+.idea/
+# Arquivos de dados e logs (opcional, mas recomendado)
+.DS_Store
+# Arquivos de variáveis de ambiente locais (se for usar)
+.env
