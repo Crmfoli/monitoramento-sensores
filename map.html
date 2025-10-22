@@ -7,68 +7,112 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
-        html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
-        #map { height: 100%; width: 100%; }
-        #risk-card { position: absolute; top: 25px; right: 25px; background-color: rgba(255, 255, 255, 0.95); padding: 15px 20px; border: 1px solid #bbb; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000; text-align: center; width: auto; min-width: 230px; } /* Ajuste padding */
-        .indicator-titles { display: flex; justify-content: space-around; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #ddd; }
-        .indicator-title { font-size: 13px; font-weight: bold; color: #333; flex-basis: 50%; text-align: center; }
-        .indicators-container { display: flex; align-items: flex-end; justify-content: space-around; gap: 20px; margin-bottom: 10px; } /* Ajuste gap */
-
-        .indicator-group {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            flex-basis: 110px;
+        /* --- Estilos Gerais --- */
+        html, body {
+            height: 100%; /* Volta a altura total, pois o card será flutuante */
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
         }
 
-        .bar-scale-aligner { display: flex; align-items: flex-end; justify-content: center; margin-bottom: 8px; }
-        .risk-bar-base { position: relative; width: 30px; height: 180px; background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 6px; display: flex; flex-direction: column-reverse; overflow: hidden; } /* Altura e largura reduzidas */
+        #map {
+            height: 100%; /* O mapa ocupa 100% da tela */
+            width: 100%;
+        }
+
+        /* --- Estilos do Card (Padrão Móvel - Pequeno, Top-Right) ---
+        Esta é a regra que define o card para telas pequenas.
+        Note que alteramos 'left: 10px' para 'right: 10px'.
+        */
+        #risk-card {
+            position: absolute; /* Torna o card flutuante */
+            top: 10px; /* Canto superior */
+            right: 10px; /* Canto direito (NOVO AJUSTE) */
+            left: auto; /* Garante que 'left' não interfira no mobile */
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 10px; /* Padding reduzido */
+            border: 1px solid #bbb;
+            border-radius: 8px; /* Borda levemente arredondada */
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 1000;
+            text-align: center;
+            width: auto;
+            max-width: 250px; /* Limite de largura para não estourar em telas muito pequenas */
+        }
+
+        .indicator-titles { display: flex; justify-content: space-around; margin-bottom: 8px; padding-bottom: 5px; border-bottom: 1px solid #ddd; }
+        .indicator-title { font-size: 11px; font-weight: bold; color: #333; flex-basis: 50%; text-align: center; }
+
+        /* Centraliza e reduz o espaço entre as barras */
+        .indicators-container { display: flex; align-items: flex-end; justify-content: space-evenly; gap: 8px; margin-bottom: 5px; }
+        .indicator-group { display: flex; flex-direction: column; align-items: center; }
+        .bar-scale-aligner { display: flex; align-items: flex-end; justify-content: center; margin-bottom: 5px; }
+
+        /* Barras de Risco (Altura reduzida para o mobile) */
+        .risk-bar-base { position: relative; width: 20px; height: 80px; background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; display: flex; flex-direction: column-reverse; overflow: hidden; }
         .risk-bar-fill-base { width: 100%; transition: height 0.5s ease-in-out, background-color 0.5s ease-in-out; }
         #rain-risk-bar-fill { height: 0%; background-color: green; }
         #soil-risk-bar-fill { height: 25%; background-color: green; }
-        #rain-risk-scale { position: relative; height: 180px; width: 30px; font-size: 10px; color: #555; margin-right: 6px; } /* Altura reduzida */
-        .scale-marker { position: absolute; width: 100%; text-align: right; padding-right: 5px; box-sizing: border-box; }
-        .scale-marker-0 { bottom: 0%; transform: translateY(50%); } .scale-marker-51 { bottom: calc(51 / 120 * 100%); transform: translateY(50%); } .scale-marker-70 { bottom: calc(70 / 120 * 100%); transform: translateY(50%); } .scale-marker-90 { bottom: calc(90 / 120 * 100%); transform: translateY(50%); } .scale-marker-120 { bottom: 100%; transform: translateY(50%); }
 
-        /* [MODIFICADO] Estilo do label de risco (caixa de texto) */
-        .risk-label {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 6px 10px;
-            margin-top: 5px;
-            display: inline-block;
-            background-color: #6c757d;
-            border: 1px solid #5a6268;
-            color: #000000; /* [MODIFICADO] Texto preto por padrão */
-            border-radius: 5px;
-            font-size: 14px;
-            font-weight: bold;
-            text-align: center;
-            white-space: nowrap;
-            text-transform: uppercase;
-            transition: background-color 0.5s ease-in-out, border-color 0.5s ease-in-out;
+        /* Escala (Tamanho reduzido) */
+        #rain-risk-scale { position: relative; height: 80px; width: 20px; font-size: 8px; color: #555; margin-right: 3px; }
+        .scale-marker { position: absolute; width: 100%; text-align: right; padding-right: 2px; box-sizing: border-box; }
+        .scale-marker-0 { bottom: 0%; transform: translateY(50%); }
+        .scale-marker-51 { bottom: calc(51 / 120 * 100%); transform: translateY(50%); }
+        .scale-marker-70 { bottom: calc(70 / 120 * 100%); transform: translateY(50%); }
+        .scale-marker-90 { bottom: calc(90 / 120 * 100%); transform: translateY(50%); }
+        .scale-marker-120 { bottom: 100%; transform: translateY(50%); }
+
+        /* Label de Risco (Tamanho reduzido) */
+        .risk-label { width: 100%; box-sizing: border-box; padding: 3px 5px; margin-top: 3px; display: inline-block; background-color: #6c757d; border: 1px solid #5a6268; color: #000000; border-radius: 4px; font-size: 10px; font-weight: bold; text-align: center; white-space: nowrap; text-transform: uppercase; transition: background-color 0.5s ease-in-out, border-color 0.5s ease-in-out; }
+
+        /* Link (Tamanho reduzido) */
+        .link-to-dashboard { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; font-size: 10px; }
+        .link-to-dashboard a { text-decoration: none; color: #0056b3; font-weight: bold; }
+        .link-to-dashboard a:hover { color: #003d80; }
+
+        /* Esconde escala em telas muito pequenas para economizar espaço */
+        @media (max-width: 380px) {
+            #rain-risk-scale {
+                display: none;
+            }
         }
 
-        .link-to-dashboard {
-            margin-top: 15px;
-            padding-top: 10px;
-            border-top: 1px solid #eee;
-            font-size: 13px;
-        }
-        .link-to-dashboard a {
-            text-decoration: none;
-            color: #0056b3;
-            font-weight: bold;
-        }
-        .link-to-dashboard a:hover {
-            color: #003d80;
+        /* --- Media Query para Desktop (Restaura layout e tamanho original) --- */
+        @media (min-width: 601px) {
+            #risk-card {
+                top: 25px;
+                right: 25px;
+                left: auto; /* Garante que ele use o 'right' */
+                width: auto;
+                min-width: 230px;
+                padding: 15px 20px;
+                border-radius: 10px;
+            }
+
+            /* Restaura tamanhos do desktop */
+            .indicator-title { font-size: 13px; }
+            .indicators-container { gap: 20px; justify-content: space-around; }
+            .risk-bar-base { height: 180px; width: 30px; }
+            #rain-risk-scale { height: 180px; width: 30px; font-size: 10px; margin-right: 6px; }
+            .risk-label { padding: 6px 10px; font-size: 14px; margin-top: 5px; }
+            .link-to-dashboard { font-size: 13px; }
+             @media (max-width: 380px) {
+                 /* Garante que a escala reapareça no desktop se a tela for > 600px */
+                #rain-risk-scale {
+                    display: block;
+                }
+            }
         }
     </style>
 </head>
 <body>
 
+    <!-- O Mapa deve vir primeiro para cobrir o fundo -->
     <div id="map"></div>
 
+    <!-- O Card flutuante (widget) -->
     <div id="risk-card">
         <div class="indicator-titles">
             <div class="indicator-title">Chuva (72h)</div>
@@ -77,6 +121,7 @@
         <div class="indicators-container">
             <div class="indicator-group" id="rain-indicator">
                 <div class="bar-scale-aligner">
+                    <!-- Escala de Chuva -->
                     <div id="rain-risk-scale">
                         <div class="scale-marker scale-marker-120">120</div>
                         <div class="scale-marker scale-marker-90">90</div>
@@ -84,6 +129,7 @@
                         <div class="scale-marker scale-marker-51">51</div>
                         <div class="scale-marker scale-marker-0">0</div>
                     </div>
+                    <!-- Barra de Chuva -->
                     <div id="rain-risk-bar-container" class="risk-bar-base">
                         <div id="rain-risk-bar-fill" class="risk-bar-fill-base"></div>
                     </div>
@@ -92,6 +138,7 @@
             </div>
             <div class="indicator-group" id="soil-indicator">
                  <div class="bar-scale-aligner">
+                    <!-- Barra de Umidade -->
                     <div id="soil-risk-bar-container" class="risk-bar-base">
                         <div id="soil-risk-bar-fill" class="risk-bar-fill-base"></div>
                     </div>
@@ -105,13 +152,22 @@
     </div>
 
     <script>
-        // ... (Script JS com modificações) ...
         const lat = -23.55; const lon = -45.35; const zoomLevel = 11;
         const map = L.map('map').setView([lat, lon], zoomLevel);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+
+        // --- Marcador e Pop-up ---
         const marker = L.marker([lat, lon]).addTo(map);
+
+        // Adiciona o evento de clique para redirecionar
         marker.on('click', function() { window.location.href = '/dashboard'; });
-        const rainRiskApiUrl = '/api/risk_data'; const rainRiskBarFill = document.getElementById('rain-risk-bar-fill'); const rainRiskLevelLabel = document.getElementById('rain-risk-level-label'); const maxAccumulation72h = 120; const updateInterval = 2000;
+
+        // --- Lógica da API de Risco de Chuva ---
+        const rainRiskApiUrl = '/api/risk_data';
+        const rainRiskBarFill = document.getElementById('rain-risk-bar-fill');
+        const rainRiskLevelLabel = document.getElementById('rain-risk-level-label');
+        const maxAccumulation72h = 120;
+        const updateInterval = 2000; // 2 segundos
 
         async function updateRainRiskBar() {
             try {
@@ -122,28 +178,31 @@
                     rainRiskLevelLabel.innerText = 'ERRO';
                     rainRiskLevelLabel.style.backgroundColor = 'grey';
                     rainRiskLevelLabel.style.borderColor = 'grey';
-                    rainRiskLevelLabel.style.color = 'black'; // Erro fica com texto preto
+                    rainRiskLevelLabel.style.color = 'black';
                     return;
                 }
                 const data = await response.json();
                 const accumulated = data.accumulated_72h || 0;
+
                 let fillPercent = (accumulated / maxAccumulation72h) * 100;
                 fillPercent = Math.max(0, Math.min(100, fillPercent));
+
                 let alertColor = 'green';
                 let alertLevelText = 'Livre';
                 if (accumulated >= 90) { alertColor = 'red'; alertLevelText = 'Paralização'; }
                 else if (accumulated >= 70) { alertColor = 'orange'; alertLevelText = 'Alerta'; }
                 else if (accumulated >= 51) { alertColor = 'gold'; alertLevelText = 'Atenção'; }
 
-                // [MODIFICADO] Define a cor do texto baseado na cor de fundo
-                const textColor = (alertColor === 'green') ? 'white' : 'black';
+                // Define a cor do texto para contraste
+                const textColor = (alertColor === 'green' || alertColor === 'red') ? 'white' : 'black';
 
                 rainRiskBarFill.style.height = `${fillPercent}%`;
                 rainRiskBarFill.style.backgroundColor = alertColor;
                 rainRiskLevelLabel.innerText = alertLevelText;
                 rainRiskLevelLabel.style.backgroundColor = alertColor;
                 rainRiskLevelLabel.style.borderColor = alertColor;
-                rainRiskLevelLabel.style.color = textColor; // [MODIFICADO]
+                rainRiskLevelLabel.style.color = textColor;
+
             } catch (error) {
                 console.error('Falha ao atualizar a barra de risco de chuva:', error);
                 rainRiskBarFill.style.height = '0%';
@@ -151,11 +210,14 @@
                 rainRiskLevelLabel.innerText = 'ERRO';
                 rainRiskLevelLabel.style.backgroundColor = 'grey';
                 rainRiskLevelLabel.style.borderColor = 'grey';
-                rainRiskLevelLabel.style.color = 'black'; // Erro fica com texto preto
+                rainRiskLevelLabel.style.color = 'black';
             }
         }
 
-        const soilRiskApiUrl = '/api/soil_risk_data'; const soilRiskBarFill = document.getElementById('soil-risk-bar-fill'); const soilRiskLevelLabel = document.getElementById('soil-risk-level-label');
+        // --- Lógica da API de Risco de Umidade ---
+        const soilRiskApiUrl = '/api/soil_risk_data';
+        const soilRiskBarFill = document.getElementById('soil-risk-bar-fill');
+        const soilRiskLevelLabel = document.getElementById('soil-risk-level-label');
 
         async function updateSoilRiskBar() {
             try {
@@ -166,7 +228,7 @@
                     soilRiskLevelLabel.innerText = 'ERRO';
                     soilRiskLevelLabel.style.backgroundColor = 'grey';
                     soilRiskLevelLabel.style.borderColor = 'grey';
-                    soilRiskLevelLabel.style.color = 'black'; // Erro fica com texto preto
+                    soilRiskLevelLabel.style.color = 'black';
                     return;
                 }
                 const data = await response.json();
@@ -174,15 +236,16 @@
                 const color = data.alert_color || 'grey';
                 const heightPercent = data.height_percent || 0;
 
-                // [MODIFICADO] Define a cor do texto baseado na cor de fundo
-                const textColor = (color === 'green') ? 'white' : 'black';
+                // Define a cor do texto para contraste
+                const textColor = (color === 'green' || color === 'red') ? 'white' : 'black';
 
                 soilRiskBarFill.style.height = `${heightPercent}%`;
                 soilRiskBarFill.style.backgroundColor = color;
                 soilRiskLevelLabel.innerText = level;
                 soilRiskLevelLabel.style.backgroundColor = color;
                 soilRiskLevelLabel.style.borderColor = color;
-                soilRiskLevelLabel.style.color = textColor; // [MODIFICADO]
+                soilRiskLevelLabel.style.color = textColor;
+
             } catch (error) {
                 console.error('Falha ao atualizar a barra de risco de umidade:', error);
                 soilRiskBarFill.style.height = '0%';
@@ -190,13 +253,17 @@
                 soilRiskLevelLabel.innerText = 'ERRO';
                 soilRiskLevelLabel.style.backgroundColor = 'grey';
                 soilRiskLevelLabel.style.borderColor = 'grey';
-                soilRiskLevelLabel.style.color = 'black'; // Erro fica com texto preto
+                soilRiskLevelLabel.style.color = 'black';
             }
         }
 
+        // --- Inicialização e Intervalo ---
         updateRainRiskBar();
         updateSoilRiskBar();
-        setInterval(() => { updateRainRiskBar(); updateSoilRiskBar(); }, updateInterval);
+        setInterval(() => {
+            updateRainRiskBar();
+            updateSoilRiskBar();
+        }, updateInterval);
     </script>
 
 </body>
